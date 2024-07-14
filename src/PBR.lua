@@ -1,4 +1,6 @@
 require "JkrGUIv2.Engine.Engine"
+require "JkrGUIv2.Threed"
+
 Validation = true
 Engine:Load(Validation)
 
@@ -6,7 +8,8 @@ app = {}
 app.window = Jkr.CreateWindow(Engine.i, "Hello", vec2(900, 480), 3)
 app.buffer3d = Jkr.CreateShapeRenderer3D(Engine.i, app.window)
 app.world3d = Jkr.World3D(app.buffer3d)
--- app.world3d:AddLight3D(vec4(10, -10, -5, 1), Jmath.Normalize(vec4(-10, -10, 5, 1)))
+app.world3d:AddLight3D(vec4(10, 10, 5, 1), Jmath.Normalize(vec4(-10, -10, 5, 1)))
+
 require("src.CompileShaders")
 require("src.Objects")
 
@@ -20,6 +23,9 @@ app.WindowClearColor = vec4(1, 1, 1, 1)
 
 local function Update()
           app.world3d:Update(e);
+          app.Objects[DamagedHelmetObjectIndex].mRotation = app.Objects[DamagedHelmetObjectIndex].mRotation:Rotate_deg(
+                    0.1,
+                    vec3(0, 1, 0))
 end
 
 local function Dispatch()

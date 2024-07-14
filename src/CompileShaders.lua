@@ -4,14 +4,6 @@ require("JkrGUIv2.Engine.Shader")
 app.Simple3Ds = {}
 app.Simple3Ds.ShouldLoad = false
 
-app.Simple3Ds.pbribl_pbribl = {
-          index = app.world3d:AddSimple3D(Engine.i, app.window),
-          fname = "cache2/pbribl_skybox.glsl",
-          vs = PBR.IBLV.str,
-          fs = PBR.IBLF.str,
-          cs = PBR.BasicCompute.str
-}
-
 -- app.Simple3Ds.pbribl_brdflut = {
 --           index = app.world3d:AddSimple3D(Engine.i, app.window),
 --           fname = "cache2/pbribl_brdflut",
@@ -44,6 +36,14 @@ app.Simple3Ds.simple_skybox = {
           cs = PBR.BasicCompute.str
 }
 
+app.Simple3Ds.pbribl_pbribl = {
+          index = app.world3d:AddSimple3D(Engine.i, app.window),
+          fname = "cache2/pbribl_skybox.glsl",
+          vs = PBR.IBLV.str,
+          fs = PBR.IBLF.str,
+          cs = PBR.BasicCompute.str
+}
+
 
 function app.Simple3Ds.Compile(this)
           this.handle = app.world3d:GetSimple3D(math.floor(this.index))
@@ -63,3 +63,15 @@ end
 -- app.Simple3Ds.Compile(app.Simple3Ds.pbribl_irradiancecube)
 app.Simple3Ds.Compile(app.Simple3Ds.pbribl_pbribl)
 app.Simple3Ds.Compile(app.Simple3Ds.simple_skybox)
+
+app.deferredComposition3D = Jkr.CreateSimple3DPipeline(Engine.i, app.window)
+app.deferredComposition3D:CompileEXT(
+          Engine.i,
+          app.window,
+          "cache2/deferredComposition3D.glsl",
+          Deferred.ScreenQuadCompositionVertex.Print().str,
+          Deferred.ScreenQuadCompositionFragment.Print().str,
+          "",
+          false,
+          Jkr.CompileContext.DeferredComposition
+)

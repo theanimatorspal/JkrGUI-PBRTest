@@ -1,3 +1,5 @@
+require "JkrGUIv2.require"
+
 Engine.Shader = function()
     local o              = {}
 
@@ -121,6 +123,16 @@ layout(std140, set = 1, binding = 2) readonly buffer JointInfluenceSSBOIn {
 };
 
 ]]
+
+    local inTangent             = [[
+        struct Tangent {
+            vec4 mTangent;
+        };
+
+        layout(std140, set = 1, binding = 14) readonly buffer TangentSSBOIn {
+            Tangent inTangent[];
+        };
+    ]]
 
     local inJointMatrices       = [[
 
@@ -324,6 +336,43 @@ vec3 ImportanceSample_GGX(vec2 Xi, float roughness, vec3 normal)
 }
        ]]
 
+    local SRGBtoLINEAR         = [[
+
+vec4 SRGBtoLINEAR(vec4 srgbIn)
+{
+	#define MANUAL_SRGB 1
+	#ifdef MANUAL_SRGB
+	#ifdef SRGB_FAST_APPROXIMATION
+	vec3 linOut = pow(srgbIn.xyz,vec3(2.2));
+	#else //SRGB_FAST_APPROXIMATION
+	vec3 bLess = step(vec3(0.04045),srgbIn.xyz);
+	vec3 linOut = mix( srgbIn.xyz/vec3(12.92), pow((srgbIn.xyz+vec3(0.055))/vec3(1.055),vec3(2.4)), bLess );
+	#endif //SRGB_FAST_APPROXIMATION
+	return vec4(linOut,srgbIn.w);;
+	#else //MANUAL_SRGB
+	return srgbIn;
+	#endif //MANUAL_SRGB
+}
+
+vec3 SRGBtoLINEAR(vec3 srgbIn)
+{
+	#define MANUAL_SRGB 1
+	#ifdef MANUAL_SRGB
+	#ifdef SRGB_FAST_APPROXIMATION
+	vec3 linOut = pow(srgbIn.xyz,vec3(2.2));
+	#else //SRGB_FAST_APPROXIMATION
+	vec3 bLess = step(vec3(0.04045),srgbIn.xyz);
+	vec3 linOut = mix( srgbIn.xyz/vec3(12.92), pow((srgbIn.xyz+vec3(0.055))/vec3(1.055),vec3(2.4)), bLess );
+	#endif //SRGB_FAST_APPROXIMATION
+	return linOut;
+	#else //MANUAL_SRGB
+	return srgbIn;
+	#endif //MANUAL_SRGB
+}
+]]
+
+
+
     local PrefilterEnvMap      = [[
 
 vec3 PrefilterEnvMap(vec3 R, float roughness)
@@ -480,15 +529,25 @@ vec3 SpecularContribution(vec3 L, vec3 V, vec3 N, vec3 F0, float metallic, float
         return o.NewLine()
     end
 
-    o.uSampler2D               = function(inBinding, inName)
-        o.str = o.str ..
-            string.format("layout(set = 1, binding = %d) uniform sampler2D %s;", inBinding, inName)
+    o.uSampler2D               = function(inBinding, inName, inSet)
+        if inSet then
+            o.str = o.str ..
+                string.format("layout(set = %d, binding = %d) uniform sampler2D %s;", inSet, inBinding, inName)
+        else
+            o.str = o.str ..
+                string.format("layout(set = 1, binding = %d) uniform sampler2D %s;", inBinding, inName)
+        end
         return o.NewLine()
     end
 
-    o.uSamplerCubeMap          = function(inBinding, inName)
-        o.str = o.str ..
-            string.format("layout(set = 1, binding = %d) uniform samplerCube %s;", inBinding, inName)
+    o.uSamplerCubeMap          = function(inBinding, inName, inSet)
+        if (inSet) then
+            o.str = o.str ..
+                string.format("layout(set = %d, binding = %d) uniform samplerCube %s;", inSet, inBinding, inName)
+        else
+            o.str = o.str ..
+                string.format("layout(set = 1, binding = %d) uniform samplerCube %s;", inBinding, inName)
+        end
         return o.NewLine()
     end
 
@@ -511,6 +570,11 @@ vec3 SpecularContribution(vec3 L, vec3 V, vec3 N, vec3 F0, float metallic, float
 
     o.inJointMatrices          = function()
         o.Append(inJointMatrices)
+        return o.NewLine()
+    end
+
+    o.inTangent                = function()
+        o.Append(inTangent)
         return o.NewLine()
     end
 
@@ -557,6 +621,12 @@ vec3 SpecularContribution(vec3 L, vec3 V, vec3 N, vec3 F0, float metallic, float
     o.Uncharted2Tonemap        = function()
         o.NewLine()
         o.Append(Uncharted2Tonemap)
+        return o.NewLine()
+    end
+
+    o.SRGBtoLINEAR             = function()
+        o.NewLine()
+        o.Append(SRGBtoLINEAR)
         return o.NewLine()
     end
 
@@ -892,6 +962,109 @@ PBR.IBLF = Engine.Shader()
     .GlslMainEnd()
 
 
+PBR.IBLF_texture = Engine.Shader()
+    .Header(450)
+    .NewLine()
+    .In(0, "vec2", "vUV")
+    .In(1, "vec3", "vNormal")
+    .In(2, "vec3", "vWorldPos")
+    .Ubo()
+    .Push()
+    .outFragColor()
+    .Append [[
+
+    struct PushConsts {
+              float roughness;
+              float metallic;
+              float specular;
+              float r;
+              float g;
+              float b;
+    } material;
+
+        ]]
+    .uSamplerCubeMap(20, "samplerIrradiance")
+    .uSampler2D(3, "samplerBRDFLUT")
+    .uSamplerCubeMap(21, "prefilteredMap")
+    .uSampler2D(4, "albedoMap")
+    .uSampler2D(5, "normalMap")
+    .uSampler2D(6, "aoMap")
+    .uSampler2D(7, "metallicMap")
+    .uSampler2D(8, "roughnessMap")
+    .PI()
+    .Append "#define ALBEDO vec3(material.r, material.g, material.b)"
+    .NewLine()
+    .Append "vec3 MaterialColor() {return vec3(material.r, material.g, material.b);}"
+    .NewLine()
+    .Uncharted2Tonemap()
+    .D_GGX()
+    .G_SchlicksmithGGX()
+    .F_Schlick()
+    .F_SchlickR()
+    .PrefilteredReflection()
+    .SpecularContribution()
+    .Append [[
+
+vec3 calculateNormal()
+{
+    vec3 tangentNormal = texture(normalMap, inUV).xyz * 2.0 - 1.0;
+
+    vec3 N = normalize(inNormal);
+    vec3 T = normalize(inTangent.xyz);
+    vec3 B = normalize(cross(N, T));
+    mat3 TBN = mat3(T, B, N);
+    return normalize(TBN * tangentNormal);
+}
+
+    ]]
+    .GlslMainBegin()
+    .Append [[
+    vec3 N = calculateNormal();
+    vec3 V = normalize(ubo.campos - vWorldPos);
+	vec3 R = reflect(-V, N);
+
+	float metallic = texture(metallicMap, vUV).r;
+	float roughness = texture(roughnessMap, vUV).r;
+
+	vec3 F0 = vec3(0.04);
+	F0 = mix(F0, ALBEDO, metallic);
+
+	vec3 Lo = vec3(0.0);
+	for(int i = 0; i < uboParams.lights[i].length(); i++) {
+		vec3 L = normalize(uboParams.lights[i].xyz - inWorldPos);
+		Lo += specularContribution(L, V, N, F0, metallic, roughness);
+	}
+	
+	vec2 brdf = texture(samplerBRDFLUT, vec2(max(dot(N, V), 0.0), roughness)).rg;
+	vec3 reflection = prefilteredReflection(R, roughness).rgb;	
+	vec3 irradiance = texture(samplerIrradiance, N).rgb;
+
+	// Diffuse based on irradiance
+	vec3 diffuse = irradiance * ALBEDO;	
+
+	vec3 F = F_SchlickR(max(dot(N, V), 0.0), F0, roughness);
+
+	// Specular reflectance
+	vec3 specular = reflection * (F * brdf.x + brdf.y);
+
+	// Ambient part
+	vec3 kD = 1.0 - F;
+	kD *= 1.0 - metallic;	
+	vec3 ambient = (kD * diffuse + specular) * texture(aoMap, vUV).rrr;
+	
+	vec3 color = ambient + Lo;
+
+	// Tone mapping exposure = 1.5
+	color = Uncharted2Tonemap(color * 2.5);
+	color = color * (1.0f / Uncharted2Tonemap(vec3(11.2f)));	
+	// Gamma correction gamma = 0.3
+	color = pow(color, vec3(1.0f / 1.3));
+
+	outFragColor = vec4(color, 1.0);
+    ]]
+    .GlslMainEnd()
+
+
 
 
 PBR.GenBrdfLutV = Engine.Shader()
@@ -934,7 +1107,7 @@ PBR.FilterCubeV = Engine.Shader()
     .Append [[
     vUVW = inPosition;
     gl_Position = Ubo.proj * Ubo.view * Push.model * vec4(inPosition, 1.0);
-    ]].InvertY()
+    ]]
     .GlslMainEnd()
 
 PBR.PreFilterEnvMapF = Engine.Shader()
@@ -1018,6 +1191,61 @@ PBR.IrradianceCubeF = Engine.Shader()
 PBR.BasicCompute = Engine.Shader()
     .Header(450)
     .GlslMainBegin()
+    .GlslMainEnd()
+
+
+Deferred = {}
+
+Deferred.ScreenQuadCompositionVertex = Engine.Shader()
+    .Header(450)
+    .Push()
+    .Out(0, "vec2", "vUV")
+    .GlslMainBegin()
+    .Append [[
+        vUV = vec2((gl_VertexIndex << 1) & 2, gl_VertexIndex & 2);
+        gl_Position = vec4(vUV * 2.0 - 1.0, 0.0, 1.0);
+    ]]
+    .GlslMainEnd()
+
+Deferred.ScreenQuadCompositionFragment = Engine.Shader()
+    .Header(450)
+    .Ubo()
+    .In(0, "vec2", "vUV")
+    .uSampler2D(3, "inPositionImage", 1)
+    .uSampler2D(4, "inNormalImage", 1)
+    .uSampler2D(5, "inAlbedoImage", 1)
+    .Push()
+    .outFragColor()
+    .GlslMainBegin()
+    .Append [[
+        vec3 fragPos = texture(inPositionImage, vUV).rgb;
+        vec3 normal = texture(inNormalImage, vUV).rgb;
+        vec3 albedo = texture(inAlbedoImage, vUV).rgb;
+        #define lightCount 8
+        #define ambient 0.0
+        vec3 fragColor = albedo.rgb * ambient;
+
+        for(int i = 0; i < 8; ++i)
+        {
+            vec3 L = Ubo.lights[i].xyz - fragPos;
+            float dist = length(L);
+            vec3 V = Ubo.campos - fragPos;
+            V = normalize(V);
+            L = normalize(L);
+            float attenuation = Ubo.lights[i].w / (dist * dist + 1.0f);
+            // diffuse
+            vec3 N = normalize(normal);
+            float NdotL = max(0.0f, dot(N, L));
+            vec3 lightColor = vec3(1, 1, 1);
+            vec3 diff = lightColor * albedo.rgb * NdotL * attenuation;
+            // specular
+            vec3 R = reflect(-L, N);
+            float NdotR = max(0.0f, dot(R, V));
+            vec3 spec = lightColor * albedo.a * pow(NdotR, 16.0f) * attenuation;
+            fragColor += diff + spec;
+        }
+        outFragColor = fragColor;
+    ]]
     .GlslMainEnd()
 
 -- TODO Remove str form everywhere

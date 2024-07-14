@@ -1,4 +1,4 @@
-require "JkrGUIv2.Basic"
+require "JkrGUIv2.require"
 
 local lerp = function(a, b, t)
     return (a * (1 - t) + t * b) * (1 - t) + b * t
@@ -114,6 +114,27 @@ Jkr.CreateCallBuffers = function() -- Similar to Comptable in JrkGUI v1
             else
                 o.mOneTimeDispatchables[inFrame] = {}
                 o.mOneTimeDispatchables[inFrame][#o.mOneTimeDispatchables[inFrame] + 1] = inCall
+            end
+        end
+    end
+
+    o.Remove = function(inIndex, inFrame, inType, inTimeType)
+        if inTimeType == "ONE" then
+            if inType == "DRAW" then
+                table.remove(o.mOneTimeDrawables[inFrame], inIndex)
+            elseif inType == "DISPATCH" then
+                table.remove(o.mOneTimeDispatchables[inFrame], inIndex)
+            elseif inType == "UPDATE" then
+                table.remove(o.mOneTimeUpdatables[inFrame], inIndex)
+            end
+        end
+        if inTimeType ~= "ONE" then
+            if inType == "DRAW" then
+                table.remove(o.mDrawables[inFrame], inIndex)
+            elseif inType == "DISPATCH" then
+                table.remove(o.mDispatchables[inFrame], inIndex)
+            elseif inType == "UPDATE" then
+                table.remove(o.mUpdatables[inFrame], inIndex)
             end
         end
     end
@@ -404,25 +425,6 @@ Jkr.CreateWidgetRenderer = function(i, w, e)
         end
         Image.CopyToSampledEXT = function(inComputeImage)
             o.s:CopyToImage(Image.sampledImage.mId, inComputeImage)
-        end
-        Image.CreateButton = function(inPosition_3f, inDimension_3f, inOnclickFunction)
-            Image.buttonBoundedRect = {}
-            Image.buttonBoundedRect.mDepthValue = math.int(inPosition_3f.z)
-            Image.buttonBoundedRect.mId = e:SetBoundedRect(vec2(inPosition_3f.x, inPosition_3f.y),
-                vec2(inDimension_3f.x, inDimension_3f.y), math.int(inPosition_3f.z))
-            Image.buttonBoundedRect.mPushId = o.c.Push(Jkr.CreateUpdatable(function()
-                local over = e:IsMouseWithinAtTopOfStack(Image.buttonBoundedRect.mId, Image.buttonBoundedRect
-                    .mDepthValue)
-                if e:IsLeftButtonPressed() and over then
-                    inOnclickFunction()
-                end
-            end))
-            Image.buttonBoundedRect.Update = function(inPosition_3f, inDimension_3f)
-                Image.sampledImage:Update(inPosition_3f, inDimension_3f)
-                e:UpdateBoundedRect(Image.buttonBoundedRect.mId, vec2(inPosition_3f.x, inPosition_3f.y),
-                    vec2(inDimension_3f.x, inDimension_3f.y), Image.buttonBoundedRect.mDepthValue)
-            end
-            return Image.buttonBoundedRect
         end
         return Image
     end
