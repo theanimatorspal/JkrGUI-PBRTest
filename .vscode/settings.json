@@ -1,5 +1,5 @@
 {
-          "workbench.colorTheme": "GitHub Dark",
+          "workbench.colorTheme": "cb8ef4b7-0844-4a04-b08b-754086598de4",
           "git.enableSmartCommit": true,
           "git.confirmSync": false,
           "gitlens.currentLine.enabled": false,
@@ -113,5 +113,6 @@
           },
           "Lua.diagnostics.disable": [
                     "lowercase-global"
-          ]
+          ],
+          "window.zoomLevel": -2
 }
