@@ -45,13 +45,13 @@ function CompileShaders()
                     cs = ""
           }
 
-          app.Simple3Ds.deferredBasic = {
-                    index = app.world3d:AddSimple3D(Engine.i, app.window),
-                    fname = "cache2/deferredBasic.glsl",
-                    vs = Deferred.BasicVertex.Print().str,
-                    fs = Deferred.BasicFragment.Print().str,
-                    cs = ""
-          }
+          -- app.Simple3Ds.deferredBasic = {
+          --           index = app.world3d:AddSimple3D(Engine.i, app.window),
+          --           fname = "cache2/deferredBasic.glsl",
+          --           vs = Deferred.BasicVertex.str,
+          --           fs = Deferred.BasicFragment.str,
+          --           cs = ""
+          -- }
 
 
           function app.Simple3Ds.Compile(this)

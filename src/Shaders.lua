@@ -24,16 +24,17 @@ app.Skybox3dF = Engine.Shader()
     .In(0, "vec3", "vVertUV")
     .outFragColor()
     .Ubo()
-    .uSamplerCubeMap(21, "irradianceCube", 0)
-    .uSamplerCubeMap(22, "prefilteredCube", 0)
+    .uSamplerCubeMap(20, "samplerCubeMap", 0)
+    .uSampler2D(23, "samplerBRDFLUT", 0)
+    .uSamplerCubeMap(24, "irradianceCube", 0)
+    .uSamplerCubeMap(25, "prefilteredCube", 0)
     .Push()
-    .uSamplerCubeMap(20, "samplerCubeMap", 1)
     .GlslMainBegin()
     .Indent()
     .Append([[
             outFragColor = texture(prefilteredCube, vVertUV) * 0.5;
             outFragColor = texture(irradianceCube, vVertUV) * 0.5;
-            outFragColor = texture(samplerCubeMap, vVertUV) * 0.5;
+            outFragColor = texture(samplerCubeMap, vVertUV) * 1;
         ]])
     .GlslMainEnd()
-    .NewLine().Print().str
+    .NewLine().str

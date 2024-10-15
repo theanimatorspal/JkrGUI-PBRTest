@@ -142,6 +142,24 @@ Engine.Load = function(self, inEnableValidation)
                     end
                 end
             end,
+
+            --@warning you have to use TCP connection as above to set the UDP's Buffer,
+            --using Jkr.SetBufferSizeUDP() call before receiving or sending anything
+            UDP = function()
+                self.net.StartUDP = function(inPort)
+                    Jkr.StartUDP(inPort)
+                end
+                self.net.SendUDP = function(inMessage, inDestination, inPort)
+                    local msg = Jkr.ConvertToVChar(inMessage)
+                    Jkr.SendUDP(msg, inDestination, inPort)
+                end
+                self.net.listenOnce = function()
+                    if not Jkr.IsMessagesBufferEmptyUDP() then
+                        local msg = Jkr.PopFrontMessagesBufferUDP()
+                        return Jkr.ConvertFromVChar(msg)
+                    end
+                end
+            end
         }
     end
 
@@ -235,10 +253,11 @@ Engine.CreatePBRShaderByGLTFMaterial = function(inGLTF, inMaterialIndex)
         .In(2, "vec3", "vWorldPos")
         .In(3, "vec4", "vTangent")
         .In(4, "flat int", "vVertexIndex")
-        .uSamplerCubeMap(21, "samplerIrradiance", 0)
-        .uSamplerCubeMap(22, "prefilteredMap", 0)
+        .uSamplerCubeMap(20, "samplerCubeMap", 0)
+        .uSampler2D(23, "samplerBRDFLUT", 0)
+        .uSamplerCubeMap(24, "samplerIrradiance", 0)
+        .uSamplerCubeMap(25, "prefilteredMap", 0)
         .Ubo()
-        .uSampler2D(10, "samplerBRDFLUT", 1)
         .outFragColor()
         .Push()
         .Append [[
@@ -357,7 +376,7 @@ vec3 calculateNormal()
 
 
 	vec3 F0 = vec3(0.04);
-	F0 = mix(F0, SRGBtoLINEAR(vec4(ALBEDO, 1.0)).xyz, metallic);
+	F0 = mix(F0, vec4(ALBEDO, 1.0).xyz, metallic);
 	vec3 Lo = vec3(0.0);
 	for(int i = 0; i < Ubo.lights[i].length(); i++) {
 		vec3 L = normalize(Ubo.lights[i].xyz - vWorldPos) * Ubo.lights[i].w;
@@ -365,8 +384,8 @@ vec3 calculateNormal()
 	}
 	
 	vec2 brdf = texture(samplerBRDFLUT, vec2(max(dot(N, V), 0.0), roughness)).rg;
-	vec3 reflection = SRGBtoLINEAR(PrefilteredReflection(R, roughness)).rgb;	
-	vec3 irradiance = SRGBtoLINEAR(texture(samplerIrradiance, N)).rgb;
+	vec3 reflection = PrefilteredReflection(R, roughness).rgb;	
+	vec3 irradiance = texture(samplerIrradiance, N).rgb;
 
 	// Diffuse based on irradiance
 	vec3 diffuse = irradiance * ALBEDO;	
@@ -399,7 +418,7 @@ vec3 calculateNormal()
     vec3 color = ambient + Lo;
 
     // Tone mapping exposure = 1.5
-	color = Uncharted2Tonemap(color * 10);
+	color = Uncharted2Tonemap(color * 2.5);
 	color = color * (1.0f / Uncharted2Tonemap(vec3(11.2f)));	
 	// Gamma correction gamma = 0.3
 	color = pow(color, vec3(1.0f / 2.2));
@@ -433,13 +452,14 @@ Engine.CreateObjectByGLTFPrimitiveAndUniform = function(inWorld3d,
     Object3D.mIndexCount = inPrimitive.mIndexCount
     Object3D.mFirstIndex = inPrimitive.mFirstIndex
     local NodeIndices = gltf:GetNodeIndexByMeshIndex(inMeshIndex - 1)
-    Object3D.mMatrix = gltf:GetNodeMatrixByIndex(NodeIndices[1])
+    Object3D.mMatrix = gltf:GetNodeMatrixByIndex(NodeIndices)
 
     return Object3D
 end
 
 
-Engine.AddObject = function(modObjectsVector, inId, inAssociatedModel, inUniformIndex, inSimple3dIndex, inGLTFHandle,
+Engine.AddObject = function(modObjects, modObjectsVector, inId, inAssociatedModel, inUniformIndex, inSimple3dIndex,
+                            inGLTFHandle,
                             inMeshIndex)
     local Object = Jkr.Object3D()
     if inId then Object.mId = inId end
@@ -448,8 +468,9 @@ Engine.AddObject = function(modObjectsVector, inId, inAssociatedModel, inUniform
     if inSimple3dIndex then Object.mAssociatedSimple3D = math.floor(inSimple3dIndex) end
     if (inGLTFHandle) then
         local NodeIndices = inGLTFHandle:GetNodeIndexByMeshIndex(inMeshIndex)
-        Object.mMatrix = inGLTFHandle:GetNodeMatrixByIndex(NodeIndices[1])
+        Object.mMatrix = inGLTFHandle:GetNodeMatrixByIndex(NodeIndices)
     end
+    modObjects[#modObjects + 1] = Object
     modObjectsVector:add(Object)
     return #modObjectsVector
 end
@@ -460,52 +481,89 @@ Engine.AddAndConfigureGLTFToWorld = function(w, inworld3d, inshape3d, ingltfmode
     local gltfmodelindex = inworld3d:AddGLTFModel(ingltfmodelname)
     local gltfmodel = inworld3d:GetGLTFModel(gltfmodelindex)
     local shapeindex = inshape3d:Add(gltfmodel) -- this ACUTALLY loads the GLTF Model
+    local Nodes = gltfmodel:GetNodesRef()
     local Meshes = gltfmodel:GetMeshesRef()
-    Engine.GetGLTFInfo(gltfmodel, true)
+    Engine.GetGLTFInfo(gltfmodel)
     local Objects = {}
+    local materials = {}
 
-    for MeshIndex = 1, #Meshes, 1 do
-        local meshindex = MeshIndex
+    for NodeIndex = 1, #Nodes, 1 do
         local shouldload = false
-        local primitives = Meshes[MeshIndex].mPrimitives
+        local primitives = Nodes[NodeIndex].mMesh.mPrimitives
 
         for PrimitiveIndex = 1, #primitives, 1 do
             local inprimitive = primitives[PrimitiveIndex]
             local materialindex = inprimitive.mMaterialIndex
+            if not materials[materialindex] then
+                local uniform3dindex = inworld3d:AddUniform3D(Engine.i)
+                local uniform = inworld3d:GetUniform3D(uniform3dindex)
+                local shaderindex = inworld3d:AddSimple3D(Engine.i, w)
+                local shader = inworld3d:GetSimple3D(shaderindex)
+                local vshader, fshader = Engine.GetAppropriateShader(inshadertype, incompilecontext, gltfmodel,
+                    materialindex,
+                    inskinning)
+                shader:CompileEXT(
+                    Engine.i,
+                    w,
+                    "cache/constant_color.glsl",
+                    vshader.str,
+                    fshader.str,
+                    "",
+                    shouldload,
+                    incompilecontext
+                )
+                local allocate_for_skinning = false
+                local allocate_for_tangent = true
+                if inskinning then allocate_for_skinning = true end
+                uniform:Build(shader, gltfmodel, 0, allocate_for_skinning, allocate_for_tangent)
+                uniform:Build(shader, gltfmodel, primitives[PrimitiveIndex])
+                materials[materialindex] = { shaderindex = shaderindex, uniformindex = uniform3dindex }
+            end
 
+            --@warning THIS IS BEING DUPLICATED, FIX THIS
             -- [[[[[[[[[[[[[[[[[[[[[[[[[[THIS IS NOT OPTIMAL]]]]]]]]]]]]]]]]]]]]]]]]]]
-            local uniform3dindex = inworld3d:AddUniform3D(Engine.i)
-            local uniform = inworld3d:GetUniform3D(uniform3dindex)
-            local shaderindex = inworld3d:AddSimple3D(Engine.i, w)
-            local shader = inworld3d:GetSimple3D(shaderindex)
-            local vshader, fshader = Engine.GetAppropriateShader(inshadertype, incompilecontext, gltfmodel, materialindex,
-                inskinning)
-            shader:CompileEXT(
-                Engine.i,
-                w,
-                "cache/constant_color.glsl",
-                vshader.str,
-                fshader.str,
-                "",
-                shouldload,
-                incompilecontext
-            )
-            local skinning = false
-            if inskinning then skinning = true end
-            uniform:Build(shader, gltfmodel, 0, skinning, true, true)
             -- [[[[[[[[[[[[[[[[[[[[[[[[[[CHANGE THIS LATER]]]]]]]]]]]]]]]]]]]]]]]]]]
 
             local object = Jkr.Object3D()
             object.mId = shapeindex;
             object.mAssociatedModel = gltfmodelindex;
-            object.mAssociatedUniform = uniform3dindex;
-            object.mAssociatedSimple3D = shaderindex;
+            object.mAssociatedUniform = materials[materialindex].uniformindex;
+            object.mAssociatedSimple3D = materials[materialindex].shaderindex;
             object.mFirstIndex = inprimitive.mFirstIndex
             object.mIndexCount = inprimitive.mIndexCount
-            local NodeIndices = gltfmodel:GetNodeIndexByMeshIndex(meshindex - 1) --@lua indexes from one
-            object.mMatrix = gltfmodel:GetNodeMatrixByIndex(NodeIndices[1])
+            object.mMatrix = Nodes[NodeIndex]:GetLocalMatrix()
+            object.mP1 = NodeIndex
 
             Objects[#Objects + 1] = object
+        end
+
+        if #primitives == 0 and #Nodes[NodeIndex].mChildren ~= 0 then
+            local object = Jkr.Object3D()
+            object.mId = shapeindex;
+            object.mAssociatedModel = gltfmodelindex;
+            object.mAssociatedUniform = -1;
+            object.mAssociatedSimple3D = -1;
+            object.mFirstIndex = -1
+            object.mIndexCount = -1
+            object.mDrawable = false
+            object.mMatrix = Nodes[NodeIndex]:GetLocalMatrix()
+            ---@note This is supposed to be used for storage of the abovematrix
+            object.mMatrix3 = Nodes[NodeIndex]:GetLocalMatrix()
+            object.mP1 = NodeIndex
+            object.mP2 = 1
+            Objects[#Objects + 1] = object
+        end
+    end
+
+    -- @warning You've to store this Objects {} table somewhere
+    for i = 1, #Objects, 1 do
+        for j = 1, #Objects, 1 do
+            if i ~= j then
+                if gltfmodel:IsNodeParentOf(Nodes[Objects[i].mP1], Nodes[Objects[j].mP1]) then
+                    print("PARENT")
+                    Objects[i]:SetParent(Objects[j])
+                end
+            end
         end
     end
     return Objects
